@@ -30,30 +30,21 @@ from fastapi.responses import RedirectResponse
 
 
 
-
-app = FastAPI()
+# ---------------- App Setup ----------------
+app = FastAPI(title="ToolForge Backend API 🚀")
 
 UPLOAD_DIR = "temp"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# ---------------- Utility ----------------
-async def save_upload(file: UploadFile) -> str:
-    """Save uploaded file to temp directory and return path"""
-    file_path = os.path.join(UPLOAD_DIR, file.filename)
-    content = await file.read()
-    with open(file_path, "wb") as f:
-        f.write(content)
-    return file_path
-
-# CORS for React frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://tool-forge-frontend-bu5k.vercel.app/"],
+    allow_origins=["https://tool-forge-frontend-bu5k.vercel.app"],  # no trailing slash
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# ---------------- Root ----------------
 @app.get("/", include_in_schema=False)
 async def root():
     return {
@@ -61,6 +52,7 @@ async def root():
         "docs": "/docs",
         "redoc": "/redoc"
     }
+
 
 
 
