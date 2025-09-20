@@ -240,11 +240,18 @@ async def base64_decode(encoded: str = Form(...)):
     buf.seek(0)
     return FileResponse(buf, media_type="application/octet-stream", filename="decoded.bin")
 
-# JSON Formatter
+# Pydantic model for JSON input
+class JsonInput(BaseModel):
+    json_text: str
+
+# JSON Formatter endpoint
 @app.post("/format-json/")
-async def format_json(json_text: str = Form(...)):
-    parsed = json.loads(json_text)
-    return {"formatted": json.dumps(parsed, indent=4)}
+async def format_json(data: JsonInput):
+    try:
+        parsed = json.loads(data.json_text)
+        return {"formatted": json.dumps(parsed, indent=4)}
+    except json.JSONDecodeError:
+        return {"error": "Invalid JSON"}
 
 
 
