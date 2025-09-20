@@ -36,6 +36,14 @@ app = FastAPI(title="ToolForge Backend API 🚀")
 UPLOAD_DIR = "temp"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+async def save_upload(file: UploadFile) -> str:
+    """Save uploaded file to temp directory and return path"""
+    file_path = os.path.join(UPLOAD_DIR, file.filename)
+    content = await file.read()
+    with open(file_path, "wb") as f:
+        f.write(content)
+    return file_path
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://tool-forge-frontend-bu5k.vercel.app/"],  # no trailing slash
