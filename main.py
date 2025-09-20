@@ -26,6 +26,8 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from fastapi.responses import StreamingResponse
 import fitz  # PyMuPDF
+from fastapi.responses import RedirectResponse
+
 
 
 
@@ -51,6 +53,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/", include_in_schema=False)
+async def root():
+    return {
+        "message": "Welcome to ToolForge Backend 🚀",
+        "docs": "/docs",
+        "redoc": "/redoc"
+    }
+
+
 
 
 # ---------------- PDF → DOCX ----------------
