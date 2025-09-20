@@ -38,7 +38,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://tool-forge-frontend-bu5k.vercel.app"],  # no trailing slash
+    allow_origins=["https://tool-forge-frontend-bu5k.vercel.app/"],  # no trailing slash
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
