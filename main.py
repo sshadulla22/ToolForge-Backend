@@ -1,33 +1,18 @@
-from fastapi import FastAPI, UploadFile, File, Form
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pdf2docx import Converter
 from PyPDF2 import PdfReader, PdfWriter
 from PIL import Image, ImageDraw, ImageFont
-import io, os, zipfile, json, base64, qrcode
-from fastapi.responses import StreamingResponse
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import FileResponse
-import tempfile, os, subprocess, shutil
+import io, os, zipfile, json, base64, qrcode, tempfile, shutil
 from uuid import uuid4
-from pdf2docx import Converter
 from pdf2image import convert_from_path
-from PIL import Image
-from docx2pdf import convert as docx2pdf_convert
-import zipfile
-import aspose.slides as slides
 from docx import Document
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
-import tempfile
-import io
 from openpyxl import load_workbook
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import A4
-from fastapi.responses import StreamingResponse
 import fitz  # PyMuPDF
-from fastapi.responses import RedirectResponse
-
+import aspose.slides as slides
 
 # ---------------- App Setup ----------------
 app = FastAPI(title="ToolForge Backend API 🚀")
@@ -40,14 +25,14 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://tool-forge-frontend-bu5k.vercel.app",
-        "http://localhost:3000"  # for local testing
+        "http://localhost:3000"
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ---------------- Utility ----------------
+# ---------------- Utility Functions ----------------
 async def save_upload(file: UploadFile) -> str:
     """Save uploaded file to temp directory with unique name"""
     ext = os.path.splitext(file.filename)[1]
@@ -58,6 +43,14 @@ async def save_upload(file: UploadFile) -> str:
         f.write(content)
     return file_path
 
+def cleanup_file(file_path: str):
+    """Safely remove file if it exists"""
+    try:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+    except Exception:
+        pass
+
 # ---------------- Root ----------------
 @app.get("/", include_in_schema=False)
 async def root():
@@ -67,380 +60,374 @@ async def root():
         "redoc": "/redoc"
     }
 
-
-
-# ---------------- PDF → DOCX ----------------
-@app.post("/pdf-to-docx/")
-async def pdf_to_docx(file: UploadFile = File(...)):
-    file_path = f"temp/{file.filename}"
-    with open(file_path, "wb") as f:
-        f.write(await file.read())
-    output_file = file_path.replace(".pdf", ".docx")
-    cv = Converter(file_path)
-    cv.convert(output_file, start=0, end=None)
-    cv.close()
-    return FileResponse(output_file, filename="converted.docx")
-
-# Merge PDFs
-@app.post("/merge-pdf/")
-async def merge_pdf(files: list[UploadFile] = File(...)):
-    merger = PdfWriter()
-    for file in files:
-        reader = PdfReader(io.BytesIO(await file.read()))
-        for page in reader.pages:
-            merger.add_page(page)
-    output_file = "temp/merged.pdf"
-    merger.write(output_file)
-    merger.close()
-    return FileResponse(output_file, media_type="application/pdf", filename="merged.pdf")
-
-@app.post("/split-pdf/")
-async def split_pdf(file: UploadFile = File(...), pages_per_split: int = Form(...)):
-    reader = PdfReader(io.BytesIO(await file.read()))
-    zip_buffer = io.BytesIO()
-
-    with zipfile.ZipFile(zip_buffer, "w") as zip_file:
-        for i in range(0, len(reader.pages), pages_per_split):
-            writer = PdfWriter()
-            for j in range(i, min(i+pages_per_split, len(reader.pages))):
-                writer.add_page(reader.pages[j])
-            buf = io.BytesIO()
-            writer.write(buf)
-            buf.seek(0)
-            zip_file.writestr(f"split_{i+1}.pdf", buf.read())
-
-    zip_buffer.seek(0)
-    return StreamingResponse(
-        zip_buffer,
-        media_type="application/zip",
-        headers={"Content-Disposition": "attachment; filename=split_pdfs.zip"}
-    )
-
-# Extract Text from PDF
-@app.post("/extract-text/")
-async def extract_text(file: UploadFile = File(...)):
-    reader = PdfReader(io.BytesIO(await file.read()))
-    text = "".join([page.extract_text() or "" for page in reader.pages])
-    return JSONResponse({"text": text})
-
-# ---------------- Resize Image ----------------
-@app.post("/resize-image/")
-async def resize_image(file: UploadFile = File(...), width: int = Form(...), height: int = Form(...)):
-    image = Image.open(io.BytesIO(await file.read()))
-    resized = image.resize((width, height))
-    buf = io.BytesIO()
-    resized.save(buf, format="JPEG")
-    buf.seek(0)
-    return StreamingResponse(buf, media_type="image/jpeg", headers={"Content-Disposition": "attachment; filename=resized.jpg"})
-
-# ---------------- Convert Format ----------------
-@app.post("/convert-format/")
-async def convert_format(file: UploadFile = File(...), format: str = Form(...)):
-    image = Image.open(io.BytesIO(await file.read()))
-    buf = io.BytesIO()
-    image.save(buf, format=format)
-    buf.seek(0)
-    return StreamingResponse(buf, media_type=f"image/{format.lower()}", headers={"Content-Disposition": f"attachment; filename=converted.{format.lower()}"})
-
-# ---------------- Add Watermark ----------------
-@app.post("/watermark/")
-async def add_watermark(file: UploadFile = File(...), text: str = Form(...), opacity: int = Form(...), font_size: int = Form(...)):
-    image = Image.open(io.BytesIO(await file.read()))
-    if image.mode in ("RGBA","LA"):
-        image = image.convert("RGB")
-    watermark = Image.new("RGBA", image.size, (0,0,0,0))
-    draw = ImageDraw.Draw(watermark)
-    try:
-        font = ImageFont.truetype("arial.ttf", font_size)
-    except:
-        font = ImageFont.load_default()
-    step_x = font_size * 10
-    step_y = font_size * 8
-    for y in range(0, image.height, step_y):
-        for x in range(0, image.width, step_x):
-            draw.text((x, y), text, fill=(255,255,255,opacity), font=font)
-    watermarked = Image.alpha_composite(image.convert("RGBA"), watermark)
-    buf = io.BytesIO()
-    watermarked.convert("RGB").save(buf, format="JPEG")
-    buf.seek(0)
-    return StreamingResponse(buf, media_type="image/jpeg", headers={"Content-Disposition": "attachment; filename=watermarked.jpg"})
-
-# ---------------- Compress Image ----------------
-@app.post("/compress-image/")
-async def compress_image(file: UploadFile = File(...), target_size: int = Form(...)):
-    image = Image.open(io.BytesIO(await file.read()))
-    if image.mode in ("RGBA","LA"):
-        image = image.convert("RGB")
-    quality = 95
-    buf = io.BytesIO()
-    image.save(buf, format="JPEG", quality=quality)
-    compressed_data = buf.getvalue()
-    compressed_size = len(compressed_data)/1024
-    while compressed_size > target_size and quality > 10:
-        quality -= 5
-        buf = io.BytesIO()
-        image.save(buf, format="JPEG", quality=quality)
-        compressed_data = buf.getvalue()
-        compressed_size = len(compressed_data)/1024
-    buf.seek(0)
-    return StreamingResponse(buf, media_type="image/jpeg", headers={"Content-Disposition": "attachment; filename=compressed.jpg"})
-
-# ---------------- Generate QR ----------------
-@app.post("/generate-qr/")
-async def generate_qr(text: str = Form(...)):
-    qr_img = qrcode.make(text)
-    buf = io.BytesIO()
-    qr_img.save(buf, format="PNG")
-    buf.seek(0)
-    return StreamingResponse(buf, media_type="image/png", headers={"Content-Disposition": "attachment; filename=qrcode.png"})
-
-# ---------------- Split PDF ----------------
-@app.post("/split-pdf/")
-async def split_pdf(file: UploadFile = File(...), pages_per_split: int = Form(...)):
-    reader = PdfReader(io.BytesIO(await file.read()))
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w") as zip_file:
-        for i in range(0, len(reader.pages), pages_per_split):
-            writer = PdfWriter()
-            for j in range(i, min(i+pages_per_split, len(reader.pages))):
-                writer.add_page(reader.pages[j])
-            buf = io.BytesIO()
-            writer.write(buf)
-            buf.seek(0)
-            zip_file.writestr(f"split_{i+1}.pdf", buf.read())
-    zip_buffer.seek(0)
-    return StreamingResponse(zip_buffer, media_type="application/zip", headers={"Content-Disposition": "attachment; filename=split_pdfs.zip"})
-
-# ---------------- Base64 Decode ----------------
-@app.post("/base64-decode/")
-async def base64_decode(encoded: str = Form(...)):
-    data = base64.b64decode(encoded)
-    buf = io.BytesIO(data)
-    buf.seek(0)
-    return StreamingResponse(buf, media_type="application/octet-stream", headers={"Content-Disposition": "attachment; filename=decoded.bin"})
-# QR Code Generator
-@app.post("/generate-qr/")
-async def generate_qr(text: str = Form(...)):
-    qr_img = qrcode.make(text)
-    buf = io.BytesIO()
-    qr_img.save(buf, format="PNG")
-    buf.seek(0)
-    return FileResponse(buf, media_type="image/png", filename="qrcode.png")
-
-# Base64 Encode
-@app.post("/base64-encode/")
-async def base64_encode(file: UploadFile = File(None), text: str = Form(None)):
-    if not file and not text:
-        return {"error": "No input provided"}
-    data = await file.read() if file else text.encode()
-    return {"base64": base64.b64encode(data).decode()}
-
-# Base64 Decode
-@app.post("/base64-decode/")
-async def base64_decode(encoded: str = Form(...)):
-    data = base64.b64decode(encoded)
-    buf = io.BytesIO(data)
-    buf.seek(0)
-    return FileResponse(buf, media_type="application/octet-stream", filename="decoded.bin")
-
-# JSON Formatter
-@app.post("/format-json/")
-async def format_json(json_text: str = Form(...)):
-    parsed = json.loads(json_text)
-    return {"formatted": json.dumps(parsed, indent=4)}
-
-
-
-# ---------- Conversions ---------- #
+# ---------- CONVERSION ENDPOINTS ---------- #
 
 # ---------------- PDF → DOCX ----------------
 @app.post("/convert/pdf-to-docx")
 async def convert_pdf_to_docx(file: UploadFile = File(...)):
-    input_path = await save_upload(file)
-    output_path = input_path.replace(".pdf", ".docx")
+    if not file.filename.lower().endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="File must be a PDF")
+    
+    input_path = None
+    output_path = None
+    
     try:
+        input_path = await save_upload(file)
+        output_path = input_path.replace(".pdf", ".docx")
+        
+        # Convert PDF to DOCX
         cv = Converter(input_path)
         cv.convert(output_path, start=0, end=None)
         cv.close()
+        
+        if not os.path.exists(output_path):
+            raise Exception("Conversion failed: DOCX file not created")
+            
+        return FileResponse(
+            output_path, 
+            filename=f"{os.path.splitext(file.filename)[0]}.docx",
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    return FileResponse(output_path, filename=os.path.basename(output_path))
+        raise HTTPException(status_code=500, detail=f"PDF to DOCX conversion failed: {str(e)}")
+    finally:
+        cleanup_file(input_path)
+        # Don't cleanup output_path here as it's being served
 
 # ---------------- DOCX → PDF ----------------
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import FileResponse
-from docx2pdf import convert as docx2pdf_convert
-import os
-
 @app.post("/convert/docx-to-pdf")
 async def convert_docx_to_pdf(file: UploadFile = File(...)):
-    input_path = os.path.join(UPLOAD_DIR, file.filename)
-    with open(input_path, "wb") as f:
-        f.write(await file.read())
-
-    output_path = os.path.splitext(input_path)[0] + ".pdf"
-
+    if not file.filename.lower().endswith(('.docx', '.doc')):
+        raise HTTPException(status_code=400, detail="File must be a DOCX/DOC")
+    
+    input_path = None
+    output_path = None
+    
     try:
+        input_path = await save_upload(file)
+        output_path = input_path.replace(os.path.splitext(input_path)[1], ".pdf")
+        
+        # Read DOCX and convert to PDF
         doc = Document(input_path)
         c = canvas.Canvas(output_path, pagesize=A4)
         width, height = A4
-        y = height - 50  # Start from top
-
+        y = height - 50
+        
         for para in doc.paragraphs:
-            text = para.text
-            if y < 50:  # Start new page
+            text = para.text.strip()
+            if not text:
+                continue
+                
+            if y < 50:  # Start new page if needed
                 c.showPage()
                 y = height - 50
-            c.drawString(50, y, text)
-            y -= 15  # line spacing
-
+                
+            # Handle long text by wrapping
+            max_width = width - 100
+            if c.stringWidth(text) > max_width:
+                words = text.split()
+                line = ""
+                for word in words:
+                    test_line = line + " " + word if line else word
+                    if c.stringWidth(test_line) > max_width:
+                        if line:
+                            c.drawString(50, y, line)
+                            y -= 15
+                            if y < 50:
+                                c.showPage()
+                                y = height - 50
+                        line = word
+                    else:
+                        line = test_line
+                if line:
+                    c.drawString(50, y, line)
+                    y -= 15
+            else:
+                c.drawString(50, y, text)
+                y -= 15
+        
         c.save()
-
+        
         if not os.path.exists(output_path):
-            raise Exception("Conversion failed: PDF not created")
-
+            raise Exception("PDF not created")
+            
+        return FileResponse(
+            output_path,
+            filename=f"{os.path.splitext(file.filename)[0]}.pdf",
+            media_type="application/pdf"
+        )
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"DOCX → PDF conversion failed: {e}")
+        raise HTTPException(status_code=500, detail=f"DOCX to PDF conversion failed: {str(e)}")
+    finally:
+        cleanup_file(input_path)
 
-    return FileResponse(output_path, filename=os.path.basename(output_path))
-
-
-# ....................PFG_IMAGE...............
+# ---------------- PDF → Image ----------------
 @app.post("/convert/pdf-to-image")
-async def convert_pdf_to_image(file: UploadFile = File(...), format: str = Form("jpg")):
+async def convert_pdf_to_image(file: UploadFile = File(...)):
+    if not file.filename.lower().endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="File must be a PDF")
+    
+    temp_dir = None
+    
     try:
-        # Save uploaded file
         temp_dir = tempfile.mkdtemp()
         input_path = os.path.join(temp_dir, file.filename)
+        
         with open(input_path, "wb") as f:
             f.write(await file.read())
-
+        
         # Convert PDF to images
-        images = convert_from_path(input_path)
+        images = convert_from_path(input_path, dpi=200)
         output_files = []
-
-        format_mapping = {"jpg": "JPEG", "png": "PNG"}
+        
         for i, img in enumerate(images):
-            img = img.convert("RGB")  # important for JPEG
-            out_path = os.path.join(temp_dir, f"page_{i}.{format.lower()}")
-            img.save(out_path, format_mapping.get(format.lower(), "JPEG"))
+            img = img.convert("RGB")
+            out_path = os.path.join(temp_dir, f"page_{i+1}.jpg")
+            img.save(out_path, "JPEG", quality=95)
             output_files.append(out_path)
-
-        # Single image -> return file, multiple -> zip
+        
+        # Return single image or ZIP for multiple
         if len(output_files) == 1:
-            return FileResponse(output_files[0], media_type=f"image/{format.lower()}", filename=f"page_0.{format.lower()}")
+            return FileResponse(
+                output_files[0],
+                filename=f"{os.path.splitext(file.filename)[0]}.jpg",
+                media_type="image/jpeg"
+            )
         else:
-            zip_path = os.path.join(temp_dir, "images.zip")
+            zip_path = os.path.join(temp_dir, "pdf_images.zip")
             with zipfile.ZipFile(zip_path, "w") as zipf:
-                for f in output_files:
-                    zipf.write(f, os.path.basename(f))
-            return FileResponse(zip_path, media_type="application/zip", filename="images.zip")
-
+                for i, img_file in enumerate(output_files):
+                    zipf.write(img_file, f"page_{i+1}.jpg")
+            
+            return FileResponse(
+                zip_path,
+                filename=f"{os.path.splitext(file.filename)[0]}_images.zip",
+                media_type="application/zip"
+            )
+            
     except Exception as e:
-        return {"error": "Conversion failed. Please try again.", "details": str(e)}
+        raise HTTPException(status_code=500, detail=f"PDF to Image conversion failed: {str(e)}")
+    finally:
+        if temp_dir and os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 # ---------------- Image → PDF ----------------
 @app.post("/convert/image-to-pdf")
 async def convert_image_to_pdf(file: UploadFile = File(...)):
-    input_path = await save_upload(file)
-    output_path = input_path + ".pdf"
+    if not file.content_type.startswith('image/'):
+        raise HTTPException(status_code=400, detail="File must be an image")
+    
+    input_path = None
+    output_path = None
+    
     try:
+        input_path = await save_upload(file)
+        output_path = os.path.splitext(input_path)[0] + ".pdf"
+        
+        # Convert image to PDF
         img = Image.open(input_path)
-        img.convert("RGB").save(output_path)
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+        
+        img.save(output_path, "PDF", resolution=100.0)
+        
+        if not os.path.exists(output_path):
+            raise Exception("PDF not created")
+            
+        return FileResponse(
+            output_path,
+            filename=f"{os.path.splitext(file.filename)[0]}.pdf",
+            media_type="application/pdf"
+        )
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    return FileResponse(output_path, filename=os.path.basename(output_path))
+        raise HTTPException(status_code=500, detail=f"Image to PDF conversion failed: {str(e)}")
+    finally:
+        cleanup_file(input_path)
 
 # ---------------- PPT/PPTX → PDF ----------------
 @app.post("/convert/ppt-to-pdf")
 async def convert_ppt_to_pdf(file: UploadFile = File(...)):
-    input_path = os.path.join(UPLOAD_DIR, file.filename)
-    with open(input_path, "wb") as f:
-        f.write(await file.read())
-
+    if not file.filename.lower().endswith(('.ppt', '.pptx')):
+        raise HTTPException(status_code=400, detail="File must be a PPT/PPTX")
+    
+    input_path = None
+    output_path = None
+    
     try:
-        # Load presentation
-        pres = slides.Presentation(input_path)
-
-        # Save to PDF
+        input_path = await save_upload(file)
         output_path = os.path.splitext(input_path)[0] + ".pdf"
+        
+        # Load and convert presentation
+        pres = slides.Presentation(input_path)
         pres.save(output_path, slides.export.SaveFormat.PDF)
-
+        pres.dispose()
+        
+        if not os.path.exists(output_path):
+            raise Exception("PDF not created")
+            
+        return FileResponse(
+            output_path,
+            filename=f"{os.path.splitext(file.filename)[0]}.pdf",
+            media_type="application/pdf"
+        )
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"PPT/PPTX → PDF conversion failed: {e}")
+        raise HTTPException(status_code=500, detail=f"PPT to PDF conversion failed: {str(e)}")
+    finally:
+        cleanup_file(input_path)
 
-    return FileResponse(output_path, filename=os.path.basename(output_path))
-
+# ---------------- Excel → PDF ----------------
 @app.post("/convert/excel-to-pdf")
 async def convert_excel_to_pdf(file: UploadFile = File(...)):
-    input_path = os.path.join(UPLOAD_DIR, file.filename)
-    with open(input_path, "wb") as f:
-        f.write(await file.read())
-
-    output_path = os.path.splitext(input_path)[0] + ".pdf"
-
+    if not file.filename.lower().endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail="File must be an Excel file")
+    
+    input_path = None
+    output_path = None
+    
     try:
+        input_path = await save_upload(file)
+        output_path = os.path.splitext(input_path)[0] + ".pdf"
+        
         wb = load_workbook(input_path)
         c = canvas.Canvas(output_path, pagesize=A4)
         width, height = A4
         margin = 50
-        y = height - margin
-
-        for sheet in wb.worksheets:
-            c.setFont("Helvetica-Bold", 14)
+        
+        for sheet_idx, sheet in enumerate(wb.worksheets):
+            if sheet_idx > 0:  # New page for each sheet except first
+                c.showPage()
+            
+            y = height - margin
+            
+            # Sheet title
+            c.setFont("Helvetica-Bold", 16)
             c.drawString(margin, y, f"Sheet: {sheet.title}")
-            y -= 20
-            c.setFont("Helvetica", 12)
-
-            for row in sheet.iter_rows(values_only=True):
-                row_text = " | ".join([str(cell) if cell is not None else "" for cell in row])
-                c.drawString(margin, y, row_text)
-                y -= 15
-                if y < margin:
+            y -= 30
+            
+            c.setFont("Helvetica", 10)
+            
+            # Process rows
+            for row_idx, row in enumerate(sheet.iter_rows(values_only=True)):
+                if y < margin + 20:  # Need new page
                     c.showPage()
                     y = height - margin
-
-            c.showPage()  # New page for next sheet
-
+                
+                # Convert row to string
+                row_values = []
+                for cell in row:
+                    if cell is not None:
+                        row_values.append(str(cell)[:50])  # Limit cell content
+                    else:
+                        row_values.append("")
+                
+                row_text = " | ".join(row_values)
+                
+                # Wrap long lines
+                max_width = width - 2 * margin
+                if c.stringWidth(row_text) > max_width:
+                    row_text = row_text[:100] + "..."  # Truncate very long rows
+                
+                c.drawString(margin, y, row_text)
+                y -= 12
+                
+                # Stop after reasonable number of rows to avoid huge PDFs
+                if row_idx > 200:
+                    c.drawString(margin, y, f"... (showing first 200 rows)")
+                    break
+        
         c.save()
-
+        
         if not os.path.exists(output_path):
             raise Exception("PDF not created")
-
+            
+        return FileResponse(
+            output_path,
+            filename=f"{os.path.splitext(file.filename)[0]}.pdf",
+            media_type="application/pdf"
+        )
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Excel → PDF conversion failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Excel to PDF conversion failed: {str(e)}")
+    finally:
+        cleanup_file(input_path)
 
-    return FileResponse(output_path, filename=os.path.basename(output_path))
+# ---------- OTHER ENDPOINTS ---------- #
 
+# Merge PDFs
+@app.post("/merge-pdf/")
+async def merge_pdf(files: list[UploadFile] = File(...)):
+    if len(files) < 2:
+        raise HTTPException(status_code=400, detail="Need at least 2 PDF files to merge")
+    
+    temp_files = []
+    try:
+        merger = PdfWriter()
+        
+        for file in files:
+            if not file.filename.lower().endswith('.pdf'):
+                raise HTTPException(status_code=400, detail="All files must be PDFs")
+            
+            file_path = await save_upload(file)
+            temp_files.append(file_path)
+            
+            reader = PdfReader(file_path)
+            for page in reader.pages:
+                merger.add_page(page)
+        
+        output_file = os.path.join(UPLOAD_DIR, f"merged_{uuid4().hex}.pdf")
+        with open(output_file, "wb") as f:
+            merger.write(f)
+        merger.close()
+        
+        return FileResponse(
+            output_file,
+            filename="merged.pdf",
+            media_type="application/pdf"
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PDF merge failed: {str(e)}")
+    finally:
+        for temp_file in temp_files:
+            cleanup_file(temp_file)
+
+# Compress PDF
 @app.post("/compress-pdf/")
 async def compress_pdf(file: UploadFile = File(...), level: str = Form("medium")):
+    if not file.filename.lower().endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="File must be a PDF")
+    
     try:
         pdf_bytes = await file.read()
         pdf_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        compressed_pdf = io.BytesIO()
-
-        # Map compression levels to image quality (0-100)
-        quality_map = {
-            "high": 20,
-            "medium": 50,
-            "low": 80
+        
+        # Compression settings
+        compress_options = {
+            "high": {"garbage": 4, "deflate": True, "clean": True, "linear": True},
+            "medium": {"garbage": 3, "deflate": True, "clean": True},
+            "low": {"garbage": 2, "deflate": True}
         }
-        quality = quality_map.get(level.lower(), 50)
-
-        # Save compressed PDF using PyMuPDF
-        pdf_doc.save(
-            compressed_pdf,
-            garbage=4,       # remove unused objects
-            deflate=True,    # compress streams
-            clean=True       # clean up
-        )
+        
+        options = compress_options.get(level.lower(), compress_options["medium"])
+        
+        compressed_pdf = io.BytesIO()
+        pdf_doc.save(compressed_pdf, **options)
+        pdf_doc.close()
         compressed_pdf.seek(0)
-
+        
+        return StreamingResponse(
+            compressed_pdf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename=compressed_{file.filename}"}
+        )
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"PDF compression failed: {e}")
+        raise HTTPException(status_code=500, detail=f"PDF compression failed: {str(e)}")
 
-    return StreamingResponse(
-        compressed_pdf,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename=compressed_{file.filename}"}
-    )
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
