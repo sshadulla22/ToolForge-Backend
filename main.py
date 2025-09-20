@@ -38,10 +38,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 # ---------------- CORS ----------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://tool-forge-frontend-bu5k.vercel.app",
-        "http://localhost:3000"  # for local testing
-    ],
+    allow_origins=["https://toolforge-frontend.onrender.com"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
