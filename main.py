@@ -5,6 +5,7 @@ from pdf2docx import Converter
 from PyPDF2 import PdfReader, PdfWriter
 from PIL import Image, ImageDraw, ImageFont
 import io, os, zipfile, json, base64, qrcode
+from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
