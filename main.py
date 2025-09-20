@@ -29,28 +29,34 @@ import fitz  # PyMuPDF
 from fastapi.responses import RedirectResponse
 
 
-
 # ---------------- App Setup ----------------
 app = FastAPI(title="ToolForge Backend API 🚀")
 
 UPLOAD_DIR = "temp"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-async def save_upload(file: UploadFile) -> str:
-    """Save uploaded file to temp directory and return path"""
-    file_path = os.path.join(UPLOAD_DIR, file.filename)
-    content = await file.read()
-    with open(file_path, "wb") as f:
-        f.write(content)
-    return file_path
-
+# ---------------- CORS ----------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://tool-forge-frontend-bu5k.vercel.app/"],  # no trailing slash
+    allow_origins=[
+        "https://tool-forge-frontend-bu5k.vercel.app",
+        "http://localhost:3000"  # for local testing
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ---------------- Utility ----------------
+async def save_upload(file: UploadFile) -> str:
+    """Save uploaded file to temp directory with unique name"""
+    ext = os.path.splitext(file.filename)[1]
+    unique_name = f"{uuid4().hex}{ext}"
+    file_path = os.path.join(UPLOAD_DIR, unique_name)
+    content = await file.read()
+    with open(file_path, "wb") as f:
+        f.write(content)
+    return file_path
 
 # ---------------- Root ----------------
 @app.get("/", include_in_schema=False)
@@ -60,8 +66,6 @@ async def root():
         "docs": "/docs",
         "redoc": "/redoc"
     }
-
-
 
 
 
