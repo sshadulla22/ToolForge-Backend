@@ -39,7 +39,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 # ---------------- CORS ----------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://toolforge-frontend.onrender.com","https://tooconvert.in","www.tooconvert.in"],
+    allow_origins=["https://www.tooconvert.in", "https://tooconvert.in"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
