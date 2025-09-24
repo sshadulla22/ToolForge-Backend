@@ -39,10 +39,14 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 # ---------------- CORS ----------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://tooconvert.in", "https://www.tooconvert.in"],
+    allow_origins=[
+        "https://www.tooconvert.in",
+        "https://tooconvert.in",
+        "https://api.tooconvert.in"
+    ],
     allow_credentials=True,
-    allow_methods=["*"],   # ✅ must allow OPTIONS, GET, POST, etc.
-    allow_headers=["*"],   # ✅ must allow Content-Type, Authorization, etc.
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
