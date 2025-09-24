@@ -39,11 +39,12 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 # ---------------- CORS ----------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://tooconvert.in/","https://toolforge-backend-1.onrender.com"],
+    allow_origins=["https://tooconvert.in", "https://www.tooconvert.in"],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],   # ✅ must allow OPTIONS, GET, POST, etc.
+    allow_headers=["*"],   # ✅ must allow Content-Type, Authorization, etc.
 )
+
 
 # ---------------- Utility ----------------
 async def save_upload(file: UploadFile) -> str:
